@@ -481,11 +481,12 @@ function box:step(dt)
                                        self.config.land_crouch_max)
             end
         end
-    elseif math.abs(self.phys.vy) < 1 and self.since_grounded < 1.0 then
-        -- Physics solver has zeroed vertical velocity: body is resting on a
+    elseif math.abs(self.phys.vy) < 1 then
+        -- Physics solver zeroed vertical velocity: body is resting on a
         -- surface (screen floor or floating window). Treat as grounded so the
-        -- pet can keep moving. `since_grounded < 1.0` avoids false-triggers
-        -- at the apex of a jump (where vy briefly crosses zero while airborne).
+        -- pet can keep walking. The jump apex briefly crosses vy == 0, but a
+        -- single frame of grounded there is harmless -- gravity pulls the pet
+        -- down again on the next sub-step.
         if not self.grounded then
             self.grounded = true
             self.since_grounded = 0
@@ -497,9 +498,7 @@ function box:step(dt)
 
     -- A body resting on top of a floating window (not the screen floor) is
     -- supported by that window: treat it as grounded if the physics solver has
-    -- zeroed its fall. Only relevant while ragdolled (the elseif above already
-    -- handles this for normal movement), so gate on STATE_RAGDOLL as a
-    -- belt-and-suspenders fallback.
+    -- zeroed its fall. Belt-and-suspenders fallback for the elseif above.
     if not self.grounded and self.state == STATE_RAGDOLL
        and math.abs(self.phys.vy) < 6 then
         self.grounded = true

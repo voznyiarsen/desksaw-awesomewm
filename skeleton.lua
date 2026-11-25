@@ -382,7 +382,20 @@ function skeleton.draw(cr, o)
             -- in this LGI/cairo build; clip() works.)
             local bb = s.bbox
             if bb then
-                cr:rectangle(bb.x0, bb.y0, bb.x1 - bb.x0, bb.y1 - bb.y0)
+                -- Transform the clip rect corners through W to screen space,
+                -- then take the bounding box. Using raw bb.x0..bb.x1 after
+                -- cr:transform(Wc) creates an inverted rectangle when Wc[1]
+                -- is negative (facing left, scale.x < 0), which cairo treats
+                -- as an empty clip region -- resulting in pure black fill.
+                local c0x, c0y = rig.xform(W, bb.x0, bb.y0)
+                local c1x, c1y = rig.xform(W, bb.x1, bb.y1)
+                local c2x, c2y = rig.xform(W, bb.x0, bb.y1)
+                local c3x, c3y = rig.xform(W, bb.x1, bb.y0)
+                local cx0 = math.min(c0x, c1x, c2x, c3x)
+                local cy0 = math.min(c0y, c1y, c2y, c3y)
+                local cx1 = math.max(c0x, c1x, c2x, c3x)
+                local cy1 = math.max(c0y, c1y, c2y, c3y)
+                cr:rectangle(cx0, cy0, cx1 - cx0, cy1 - cy0)
                 cr:clip()
             end
             cr:paint()
