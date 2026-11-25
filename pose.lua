@@ -149,6 +149,27 @@ end
 -- Clip sampling
 -- ---------------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------------
+-- Clip sampling with Catmull-Rom cubic interpolation.
+--
+-- Godot's AnimationPlayer defaults to cubic interpolation for animation
+-- tracks. Without the actual curve resources from the .tscn, a Catmull-Rom
+-- spline (tension = 0, Godot's default) is the closest portable match: it
+-- passes through every keyframe and uses the neighbouring keyframes as
+-- tangents, so motion between keys is smooth rather than piecewise-linear.
+-- ---------------------------------------------------------------------------
+
+-- Catmull-Rom spline through p0,p1,p2,p3 at parameter u in [0,1] between p1
+-- and p2. Works on scalars; vector2 tracks are interpolated component-wise.
+local function catmull_rom(p0, p1, p2, p3, u)
+    local u2 = u * u
+    local u3 = u2 * u
+    return 0.5 * ((2 * p1)
+                 + (-p0 + p2) * u
+                 + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2
+                 + (-p0 + 3 * p1 - 3 * p2 + p3) * u3)
+end
+
 function pose.sample_track(track, t)
     local times, vals = track[1], track[2]
     local n = #times
@@ -162,11 +183,18 @@ function pose.sample_track(track, t)
     end
     local a, b = times[lo], times[hi]
     local u = (b > a) and (t - a) / (b - a) or 0
-    local va, vb = vals[lo], vals[hi]
-    if type(va) == "table" then
-        return { va[1] + (vb[1] - va[1]) * u, va[2] + (vb[2] - va[2]) * u }
+    -- Catmull-Rom needs four control points; clamp at the ends.
+    local p0 = lo > 1 and vals[lo - 1] or vals[lo]
+    local p1 = vals[lo]
+    local p2 = vals[hi]
+    local p3 = hi < n and vals[hi + 1] or vals[hi]
+    if type(p1) == "table" then
+        return {
+            catmull_rom(p0[1], p1[1], p2[1], p3[1], u),
+            catmull_rom(p0[2], p1[2], p2[2], p3[2], u),
+        }
     end
-    return va + (vb - va) * u
+    return catmull_rom(p0, p1, p2, p3, u)
 end
 
 -- ---------------------------------------------------------------------------

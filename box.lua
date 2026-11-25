@@ -125,6 +125,7 @@ function box.new(screen, config)
                 crouch = (self.crouch or 0) / self.scale,
                 rag = (self.state == STATE_RAGDOLL) and self.rag or nil,
                 eye = self.eye_texture,
+                head = self.head_texture,
             })
         end)
         if not ok then
@@ -187,6 +188,38 @@ function box.new(screen, config)
     self.crouch = 0       -- px
     self.visual_offset_x = 0
     self.visual_offset_y = 0
+
+    -- Face system (ported from Scripts/impo/faceSys.gd).
+    -- Emotion-driven eye textures, blinking, talking (mouth via head
+    -- texture), and lookback (eye looks toward the cursor when it sits on
+    -- the opposite side from the pet's facing).
+    local EYES = {
+        normal  = { open = "experimentEyeOpen",   closed = "experimentEyeClosed",   back = "experimentEyeLookBack" },
+        sad     = { open = "experimentEyeSad",    closed = "experimentEyeClosed",   back = "experimentEyeSadBack" },
+        sleep   = { open = "experimentEyeClosed", closed = "experimentEyeClosed",   back = "experimentEyeClosed" },
+        tired   = { open = "experimentEyeHalfClosed", closed = "experimentEyeClosed", back = "experimentEyeHalfClosedBack" },
+        scared  = { open = "experimentEyeScared", closed = "experimentEyeClosed",   back = "experimentEyeScaredBack" },
+        panic   = { open = "experimentEyePanic",  closed = "experimentEyePanic",    back = "experimentEyePanic" },
+        happy   = { open = "experimentEyeHappy",  closed = "experimentEyeHappy",    back = "experimentEyeHappy" },
+    }
+    local HEADS = {
+        default = "experimentHeadBack",
+        open    = "experimentHeadBackMouth",
+        opensmall = "experimentHeadBackMouthMini",
+    }
+    self.face_emotion = "normal"
+    self.face_talking = false
+    self.face_blinking = false
+    self.face_lookback = false
+    self.face_blink_timer = 0          -- counts up to 2-4s between blinks
+    self.face_blink_for = 0            -- 0.15s blink duration
+    self.face_talk_timer = 0           -- cycles mouth while talking
+    self.face_eye_timer = 0            -- 0.2s eye-direction updates
+    self.face_eyes = EYES
+    self.face_heads = HEADS
+    self.eye_texture = EYES.normal.open
+    self.head_texture = HEADS.default
+
     self.jump_timer = 0
     self.since_grounded = 0
     self.grounded = true
@@ -496,6 +529,61 @@ function box:step(dt)
             self.phase = 0
         end
         self.clip = clip
+
+        -- Face system (ported from Scripts/impo/faceSys.gd).
+        -- Blink: every 2-4s, close eyes for 0.15s (skipped while talking).
+        self.face_blink_timer = self.face_blink_timer + dt
+        if not self.face_blinking and not self.face_talking then
+            if self.face_blink_timer >= (self.face_blink_for > 0 and 0.15 or (2 + math.random() * 2)) then
+                -- decide next blink interval only when not currently blinking
+                if self.face_blink_for == 0 then
+                    self.face_blink_for = 2 + math.random() * 2
+                end
+            end
+            if self.face_blink_timer >= self.face_blink_for then
+                self.face_blinking = true
+                self.face_blink_timer = 0
+                self.face_blink_for = 0.15  -- blink duration
+            end
+        elseif self.face_blinking then
+            self.face_blink_timer = self.face_blink_timer + dt
+            if self.face_blink_timer >= 0.15 then
+                self.face_blinking = false
+                self.face_blink_timer = 0
+                self.face_blink_for = 2 + math.random() * 2  -- next interval
+            end
+        end
+
+        -- Lookback: cursor on the opposite side from facing -> "back" eye.
+        local mx, my = mouse.coords().x, mouse.coords().y
+        local px = self.phys.cx
+        local lookback = (mx < px and self.facing == 1) or (mx > px and self.facing == -1)
+        self.face_lookback = lookback
+
+        -- Eye direction update: every 0.2s, pick open/back eye (unless blinking).
+        self.face_eye_timer = self.face_eye_timer + dt
+        if self.face_eye_timer >= 0.2 then
+            self.face_eye_timer = 0
+            if not self.face_blinking then
+                local e = self.face_eyes[self.face_emotion]
+                self.eye_texture = lookback and e.back or e.open
+            end
+        end
+
+        -- Talking: cycle head texture (default -> opensmall -> default).
+        if self.face_talking then
+            self.face_talk_timer = self.face_talk_timer + dt
+            local t = self.face_talk_timer
+            local cycle = 0.08 + math.random() * 0.10  -- mouth open/close cadence
+            local phase = t % (cycle * 2)
+            if phase < cycle then
+                self.head_texture = self.face_heads.opensmall
+            else
+                self.head_texture = self.face_heads.default
+            end
+        else
+            self.head_texture = self.face_heads.default
+        end
 
         -- Lean from acceleration (DeskSaw live_body).
         local dv = self.phys.vx - self._last_vx

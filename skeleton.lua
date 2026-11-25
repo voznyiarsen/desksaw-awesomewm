@@ -64,6 +64,7 @@ local PARTS = {
 skeleton.PARTS = PARTS
 skeleton.texture_dir = "/home/tsuchinoko/desksaw/assets/Body/"
 skeleton.eye_texture = "experimentEyeOpen"
+skeleton.head_texture = "experimentHeadBack"
 
 -- ---------------------------------------------------------------------------
 -- Texture loading + tight opaque bounds.
@@ -383,9 +384,12 @@ function skeleton.draw(cr, o)
     table.sort(draw_list, function(a, b) return a.z < b.z end)
 
     local eye = o.eye or skeleton.eye_texture
+    local head = o.head or skeleton.head_texture
 
     for _, part in ipairs(draw_list) do
-        local tex = (part.tex == "experimentEyeOpen" and eye) or part.tex
+        local tex = part.tex
+        if part.tex == "experimentEyeOpen" then tex = eye end
+        if part.tex == "experimentHeadBack" then tex = head end
         local s = load_surface(tex)
         if s then
             -- Bone -> part transform (RemoteTransform2D attach, then the
