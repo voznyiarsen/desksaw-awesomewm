@@ -178,6 +178,9 @@ function box.new(screen, config)
         cr:restore()
     end
     self.wibox:set_bgimage(self._bgimage_func, nil, self)
+    -- No widget hierarchy: nothing should be drawn after the bgimage callback.
+    -- Setting fg to transparent prevents any leftover widget drawing.
+    self.wibox:set_widget(nil)
     self.wibox:set_bg("#00000000")
     self.wibox:set_fg("#00000000")
 
