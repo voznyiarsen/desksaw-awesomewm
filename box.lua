@@ -156,11 +156,17 @@ function box.new(screen, config)
     self._shape_fn = shape_fn
     self.wibox:set_shape(shape_fn)
 
-    self.wibox:set_bgimage(function(context, cr, w, h, _, self_ref)
+    -- Store the bgimage callback so it can be re-set to force a redraw when
+    -- the face texture changes (blink, lookback, talking). Without this, the
+    -- wibox only redraws when the pet moves, so a standing pet's eyes would
+    -- never update. `set_bgimage` emits widget::redraw_needed which forces a
+    -- repaint even when the geometry is unchanged.
+    self._bgimage_func = function(context, cr, w, h, _, self_ref)
         cr:save()
         self_ref._draw_pet(cr, w, h)
         cr:restore()
-    end, nil, self)
+    end
+    self.wibox:set_bgimage(self._bgimage_func, nil, self)
 
     -- Build both facing masks now, so the first direction flip does not hitch.
     self:warm_shape_masks(vis, vis)
@@ -755,11 +761,10 @@ function box:step(dt)
 
     -- Redraw when the face changed (blink, lookback, talking). Without this,
     -- the wibox only redraws when the pet moves, so a standing pet's eyes
-    -- would never update. `emit_signal` doesn't work on wiboxes; force a
-    -- geometry re-set to trigger a repaint.
+    -- would never update. Re-setting the bgimage emits widget::redraw_needed
+    -- which forces a repaint even when the geometry is unchanged.
     if face_dirty then
-        local g = self.wibox:geometry()
-        self.wibox:geometry(g)
+        self.wibox:set_bgimage(self._bgimage_func, nil, self)
     end
 
     self:set_geometry()
