@@ -80,6 +80,9 @@ module.config = {
     sound_min_speed = 100,
 }
 
+-- Menu cache, per screen index (used by toggle_debug_menu).
+local debug_menus = {}
+
 -- (Re)create the actor on `screen`, with a fixed-timestep drive timer.
 function module.set_mode(screen)
     if not box then
@@ -128,9 +131,6 @@ end
 -- Returns an awful.menu-compatible items table. Each action looks up the
 -- actor fresh at call time, so a cached menu stays correct after actor
 -- recreation.
--- Menu cache, per screen index.
-local debug_menus = {}
-
 local function debug_menu_items(screen)
     local idx = screen and screen.index or 1
     local ctrl = module.controllers[idx]
