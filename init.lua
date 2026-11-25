@@ -8,6 +8,7 @@
 --   awful.screen.connect_for_each_screen(function(s) desksaw.init(s) end)
 
 local gears = require("gears")
+local awful = require("awful")
 
 -- Box (and everything under it) is loaded defensively: if the renderer fails
 -- to load, desksaw degrades to "no pet" rather than erroring out of rc.lua.
@@ -94,6 +95,28 @@ function module.set_mode(screen)
 
     local actor = box.new(screen, module.config)
     actor.last_tick = box.now()
+
+    -- Debug menu: right-click the pet to force states for testing.
+    local debug_menu = awful.menu {
+        items = {
+            { "Idle",           function() actor:set_debug_state("idle", 0) end },
+            { "Move left",      function() actor:set_debug_state("moving", -1) end },
+            { "Move right",     function() actor:set_debug_state("moving", 1) end },
+            { "Jump",           function() actor:set_debug_state("jumping", 0) end },
+            { "Fall",           function() actor:set_debug_state("falling", 0) end },
+            { "Ragdoll",        function() actor:set_debug_state("ragdoll", 0) end },
+            { "Recover",        function() actor:set_debug_state("idle", 0) end },
+            { "Respawn",        function() actor:respawn() end },
+        },
+    }
+
+    -- Right-click on the pet opens the debug menu.
+    actor.wibox:buttons(gears.table.join(
+        awful.button({}, 1, function() actor:grab() end),
+        awful.button({}, 3, function()
+            debug_menu:toggle()
+        end)
+    ))
 
     local timer = gears.timer { timeout = 1 / module.config.fps }
     local step_dt = 1 / module.config.fps

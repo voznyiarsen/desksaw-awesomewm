@@ -12,6 +12,7 @@ local gears = require("gears")
 local wibox = require("wibox")
 local awful = require("awful")
 local GLib = require("lgi").GLib
+local cairo = require("lgi").cairo
 
 local physics = require("desksaw.physics")
 local skeleton = require("desksaw.skeleton")
@@ -90,12 +91,14 @@ function box.new(screen, config)
         x = 0, y = 0,
         width = vis,
         height = vis,
-        bg = "#00000000",
         border_width = config.border_width or 0,
         border_color = "#00000000",
         cursor = "arrow",
         type = "dock",
     }
+    -- The drawable sets bg = beautiful.bg_normal by default; override with
+    -- fully transparent so the area around the pet stays see-through.
+    self.wibox:set_bg(gears.color.transparent)
 
     -- The wibox draw callbacks run inside AwesomeWM's C draw path. An error
     -- thrown there is NOT catchable by Lua and takes the whole WM down (this
@@ -162,11 +165,22 @@ function box.new(screen, config)
     -- never update. `set_bgimage` emits widget::redraw_needed which forces a
     -- repaint even when the geometry is unchanged.
     self._bgimage_func = function(context, cr, w, h, _, self_ref)
+        -- Reset the clip to the full surface. The drawable clips to the dirty
+        -- area before calling this callback, so cr:paint() would otherwise
+        -- only cover the dirty region. Clearing the clip lets us paint the
+        -- whole wibox surface transparent first, then draw the pet on top.
+        cr:reset_clip()
+        cr:set_source_rgba(0, 0, 0, 0)
+        cr:set_operator(cairo.Operator.SOURCE)
+        cr:paint()
+        cr:set_operator(cairo.Operator.OVER)
         cr:save()
         self_ref._draw_pet(cr, w, h)
         cr:restore()
     end
     self.wibox:set_bgimage(self._bgimage_func, nil, self)
+    self.wibox:set_bg("#00000000")
+    self.wibox:set_fg("#00000000")
 
     -- Build both facing masks now, so the first direction flip does not hitch.
     self:warm_shape_masks(vis, vis)
@@ -399,6 +413,46 @@ function box:recover_from_ragdoll()
     self._last_angle = nil
     self.wibox:set_shape(self._shape_fn)
     self:set_geometry()
+end
+
+-- ---------------------------------------------------------------------------
+-- Debug / test helpers: force the pet into a specific state so each pose can
+-- be inspected. Bound to a right-click menu from init.lua.
+-- ---------------------------------------------------------------------------
+
+--- Force the pet into a given state for testing.
+-- @param state one of "idle", "moving", "jumping", "falling", "ragdoll"
+-- @param dir   -1 left, 0 none, 1 right (only used for moving/idle-facing)
+function box:set_debug_state(state, dir)
+    if state == STATE_RAGDOLL then
+        self:enter_ragdoll()
+        return
+    end
+    if self.state == STATE_RAGDOLL then
+        self:recover_from_ragdoll()
+    end
+    self.dir = dir or 0
+    if dir and dir ~= 0 then
+        self.facing = dir
+    end
+    self.state = state
+    -- Reset animation phase so the clip starts fresh.
+    self.phase = 0
+    self.clip = state
+    self.wander_timer = 0
+    self.wander_phase = state == STATE_MOVING and "walk" or "idle"
+end
+
+--- Set the walking direction (and facing) for testing.
+function box:set_dir(dir)
+    self.dir = dir
+    if dir ~= 0 then
+        self.facing = dir
+        self.state = STATE_MOVING
+    else
+        self.state = STATE_IDLE
+    end
+    self.phase = 0
 end
 
 -- Pick a wander direction + optionally jump.
