@@ -442,7 +442,11 @@ function box:step(dt)
         if clip == "moveF" then
             local norm = math.min(1, math.abs(self.phys.vx)
                               / math.max(1, self.config.maxspeed * self.config.walk_mult))
-            self.phase = self.phase + dt * (0.5 + 1.6 * norm)
+            -- Walk cycle playback speed. The moveF clip is 0.58s long; the
+            -- old (0.5 + 1.6 * norm) rate (~2/sec) looped it ~3.5 times a
+            -- second, which looked like running, not walking. Slow it to
+            -- roughly one loop every 0.6-0.7s at full pace.
+            self.phase = self.phase + dt * (0.25 + 0.8 * norm)
         elseif clip == "jump" or clip == "fall" then
             self.phase = self.phase + dt
         else
