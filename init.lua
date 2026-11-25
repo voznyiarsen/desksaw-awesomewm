@@ -92,6 +92,9 @@ function module.set_mode(screen)
         ctrl.actor:destroy()
         if ctrl.timer then ctrl.timer:stop() end
     end
+    -- Invalidate cached debug menu for this screen so it gets recreated
+    -- with the new actor reference.
+    debug_menus[idx] = nil
 
     local actor = box.new(screen, module.config)
     actor.last_tick = box.now()
@@ -121,45 +124,63 @@ function module.set_mode(screen)
     return actor
 end
 
--- Debug helpers: force the pet into a specific state for testing.
--- Called directly from rc.lua's mymainmenu desksaw submenu (right-click
--- workspace → desksaw). No custom menu is spawned; each item acts directly.
-
---- Force the pet into a given state for testing.
--- @param screen the screen the pet is on
--- @param state one of "idle", "moving", "jumping", "falling", "ragdoll"
--- @param dir   -1 left, 0 none, 1 right (only used for moving/idle-facing)
-function module.debug_state(screen, state, dir)
+-- Debug submenu items for rc.lua's mymainmenu desksaw submenu.
+-- Returns an awful.menu-compatible items table. Each action looks up the
+-- actor fresh at call time, so a cached menu stays correct after actor
+-- recreation.
+local function debug_menu_items(screen)
     local idx = screen and screen.index or 1
     local ctrl = module.controllers[idx]
-    if not ctrl or not ctrl.actor then return end
+    if not ctrl or not ctrl.actor then return {} end
     local actor = ctrl.actor
 
-    if state == STATE_RAGDOLL then
-        actor:enter_ragdoll()
-        return
+    local function set_state(state, dir)
+        if state == STATE_RAGDOLL then
+            actor:enter_ragdoll()
+            return
+        end
+        if actor.state == STATE_RAGDOLL then
+            actor:recover_from_ragdoll()
+        end
+        actor.dir = dir or 0
+        if dir and dir ~= 0 then
+            actor.facing = dir
+        end
+        actor.state = state
+        actor.phase = 0
+        actor.clip = state
+        actor.wander_timer = 0
+        actor.wander_phase = state == STATE_MOVING and "walk" or "idle"
     end
-    if actor.state == STATE_RAGDOLL then
-        actor:recover_from_ragdoll()
-    end
-    actor.dir = dir or 0
-    if dir and dir ~= 0 then
-        actor.facing = dir
-    end
-    actor.state = state
-    -- Reset animation phase so the clip starts fresh.
-    actor.phase = 0
-    actor.clip = state
-    actor.wander_timer = 0
-    actor.wander_phase = state == STATE_MOVING and "walk" or "idle"
+
+    return {
+        { "Idle",           function() set_state("idle", 0) end },
+        { "Move left",      function() set_state("moving", -1) end },
+        { "Move right",     function() set_state("moving", 1) end },
+        { "Jump",           function() set_state("jumping", 0) end },
+        { "Fall",           function() set_state("falling", 0) end },
+        { "Ragdoll",        function() set_state("ragdoll", 0) end },
+        { "Recover",        function() set_state("idle", 0) end },
+        { "Respawn",        function() actor:respawn() end },
+    }
 end
 
--- Respawn the pet on the given screen (used by respawn menu item).
-function module.respawn(screen)
+-- Toggle the debug submenu for the given screen.
+-- Menu is created once per screen and reused (no spawning new instances).
+local debug_menus = {}
+function module.toggle_debug_menu(screen)
     local idx = screen and screen.index or 1
     local ctrl = module.controllers[idx]
     if not ctrl or not ctrl.actor then return end
-    ctrl.actor:respawn()
+
+    local menu = debug_menus[idx]
+    if not menu then
+        menu = awful.menu {
+            items = debug_menu_items(screen),
+        }
+        debug_menus[idx] = menu
+    end
+    menu:toggle()
 end
 
 function module.init(screen)
