@@ -178,11 +178,8 @@ function box.new(screen, config)
         cr:restore()
     end
     self.wibox:set_bgimage(self._bgimage_func, nil, self)
-    -- No widget hierarchy: nothing should be drawn after the bgimage callback.
-    -- Setting fg to transparent prevents any leftover widget drawing.
-    self.wibox:set_widget(nil)
-    self.wibox:set_bg("#00000000")
-    self.wibox:set_fg("#00000000")
+    self.wibox:set_bg(gears.color.transparent)
+    self.wibox:set_fg(gears.color.transparent)
 
     -- Build both facing masks now, so the first direction flip does not hitch.
     self:warm_shape_masks(vis, vis)
