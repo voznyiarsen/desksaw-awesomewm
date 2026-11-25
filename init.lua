@@ -128,6 +128,9 @@ end
 -- Returns an awful.menu-compatible items table. Each action looks up the
 -- actor fresh at call time, so a cached menu stays correct after actor
 -- recreation.
+-- Menu cache, per screen index.
+local debug_menus = {}
+
 local function debug_menu_items(screen)
     local idx = screen and screen.index or 1
     local ctrl = module.controllers[idx]
@@ -167,7 +170,6 @@ end
 
 -- Toggle the debug submenu for the given screen.
 -- Menu is created once per screen and reused (no spawning new instances).
-local debug_menus = {}
 function module.toggle_debug_menu(screen)
     local idx = screen and screen.index or 1
     local ctrl = module.controllers[idx]
