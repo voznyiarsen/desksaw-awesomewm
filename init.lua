@@ -146,6 +146,16 @@ function module.debug_state(screen, state, dir)
     if dir and dir ~= 0 then
         actor.facing = dir
     end
+    -- Apply physics so the state actually persists: step() decides state from
+    -- grounded/vy every frame, so just setting state isn't enough — we need
+    -- velocity to carry the pet into the target state.
+    if state == STATE_JUMPING then
+        actor.phys.vy = (actor.config.jump_power or -600)
+                      * (actor.config.jump_mult or 1.22)
+        actor.jump_timer = actor.config.jump_cooldown
+    elseif state == STATE_FALLING then
+        actor.phys.vy = 300  -- downward
+    end
     actor.state = state
     -- Reset animation phase so the clip starts fresh.
     actor.phase = 0
