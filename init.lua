@@ -137,6 +137,10 @@ function module.debug_state(screen, state, dir)
 
     if state == STATE_RAGDOLL then
         actor:enter_ragdoll()
+        -- Give the pet a shove so it actually falls over instead of just
+        -- standing limp on the floor.
+        actor.phys.vx = (dir or 1) * 150
+        actor.phys.vy = 0
         return
     end
     if actor.state == STATE_RAGDOLL then
@@ -153,8 +157,10 @@ function module.debug_state(screen, state, dir)
         actor.phys.vy = (actor.config.jump_power or -600)
                       * (actor.config.jump_mult or 1.22)
         actor.jump_timer = actor.config.jump_cooldown
+        actor.grounded = false
     elseif state == STATE_FALLING then
         actor.phys.vy = 300  -- downward
+        actor.grounded = false
     end
     actor.state = state
     -- Reset animation phase so the clip starts fresh.
