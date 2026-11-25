@@ -80,9 +80,6 @@ module.config = {
     sound_min_speed = 100,
 }
 
--- Menu cache, per screen index (used by toggle_debug_menu).
-local debug_menus = {}
-
 -- (Re)create the actor on `screen`, with a fixed-timestep drive timer.
 function module.set_mode(screen)
     if not box then
@@ -95,9 +92,6 @@ function module.set_mode(screen)
         ctrl.actor:destroy()
         if ctrl.timer then ctrl.timer:stop() end
     end
-    -- Invalidate cached debug menu for this screen so it gets recreated
-    -- with the new actor reference.
-    debug_menus[idx] = nil
 
     local actor = box.new(screen, module.config)
     actor.last_tick = box.now()
@@ -127,10 +121,9 @@ function module.set_mode(screen)
     return actor
 end
 
--- Debug submenu items for rc.lua's mymainmenu desksaw submenu.
--- Returns an awful.menu-compatible items table. Each action looks up the
--- actor fresh at call time, so a cached menu stays correct after actor
--- recreation.
+-- Debug menu items for rc.lua's "desksaw debug" top-level menu.
+-- Each action looks up the actor fresh at call time, so a cached menu
+-- stays correct after actor recreation.
 local function debug_menu_items(screen)
     local idx = screen and screen.index or 1
     local ctrl = module.controllers[idx]
@@ -168,23 +161,19 @@ local function debug_menu_items(screen)
     }
 end
 
--- Toggle the debug submenu for the given screen.
--- Menu is created once per screen and reused (no spawning new instances).
+-- Create the debug menu once per screen, store it in the controller.
+-- Calling toggle_debug_menu() simply shows/hides it — no new instances.
 function module.toggle_debug_menu(screen)
     local idx = screen and screen.index or 1
     local ctrl = module.controllers[idx]
     if not ctrl or not ctrl.actor then return end
 
-    local menu = debug_menus[idx]
-    if not menu then
-        menu = awful.menu {
+    if not ctrl.debug_menu then
+        ctrl.debug_menu = awful.menu {
             items = debug_menu_items(screen),
         }
-        debug_menus[idx] = menu
     end
-    -- Use show() instead of toggle(): when called from a parent menu item
-    -- callback, toggle() can conflict with the parent menu closing.
-    pcall(function() menu:show() end)
+    ctrl.debug_menu:toggle()
 end
 
 function module.init(screen)
