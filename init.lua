@@ -80,6 +80,12 @@ module.config = {
     sound_min_speed = 100,
 }
 
+-- Debug menu: force the pet into a specific state for testing.
+-- Uses AwesomeWM's awful.menu (the standard dropdown). Toggles on call.
+-- Menu is cached per screen so the same instance is reused (no spawning
+-- new menu instances on every call).
+local debug_menus = {}
+
 -- (Re)create the actor on `screen`, with a fixed-timestep drive timer.
 function module.set_mode(screen)
     if not box then
@@ -128,7 +134,6 @@ end
 -- Uses AwesomeWM's awful.menu (the standard dropdown). Toggles on call.
 -- Menu is cached per screen so the same instance is reused (no spawning
 -- new menu instances on every call).
-local debug_menus = {}
 function module.debug_menu(screen)
     local idx = screen and screen.index or 1
     local ctrl = module.controllers[idx]
