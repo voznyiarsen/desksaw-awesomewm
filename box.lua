@@ -425,6 +425,8 @@ function box:step(dt)
     end
     if not self.phys then return end
 
+    local face_dirty = false
+
     -- Ragdoll: drive the limp limbs from the body's motion, then recover once
     -- the body has settled (or after a hard timeout).
     if self.state == STATE_RAGDOLL then
@@ -532,10 +534,12 @@ function box:step(dt)
 
         -- Face system (ported from Scripts/impo/faceSys.gd).
         -- Blink: every 2-4s, close eyes for 0.15s (skipped while talking).
+        face_dirty = false
+        local old_eye, old_head = self.eye_texture, self.head_texture
+
         self.face_blink_timer = self.face_blink_timer + dt
         if not self.face_blinking and not self.face_talking then
             if self.face_blink_timer >= (self.face_blink_for > 0 and 0.15 or (2 + math.random() * 2)) then
-                -- decide next blink interval only when not currently blinking
                 if self.face_blink_for == 0 then
                     self.face_blink_for = 2 + math.random() * 2
                 end
@@ -555,6 +559,8 @@ function box:step(dt)
         end
 
         -- Lookback: cursor on the opposite side from facing -> "back" eye.
+        -- Runs every frame (idle too) so the pet reacts to the mouse even
+        -- while standing still.
         local mx, my = mouse.coords().x, mouse.coords().y
         local px = self.phys.cx
         local lookback = (mx < px and self.facing == 1) or (mx > px and self.facing == -1)
@@ -583,6 +589,13 @@ function box:step(dt)
             end
         else
             self.head_texture = self.face_heads.default
+        end
+
+        -- Force a wibox redraw when the face texture changed: when the pet is
+        -- standing still nothing else moves, so the wibox would otherwise not
+        -- redraw and the new eye/head texture would never appear on screen.
+        if self.eye_texture ~= old_eye or self.head_texture ~= old_head then
+            face_dirty = true
         end
 
         -- Lean from acceleration (DeskSaw live_body).
@@ -739,6 +752,14 @@ function box:step(dt)
 
     self._last_vx = self.phys.vx
     self._last_vy = self.phys.vy
+
+    -- Redraw when the face changed (blink, lookback, talking). Without this,
+    -- the wibox only redraws when the pet moves, so a standing pet's eyes
+    -- would never update.
+    if face_dirty then
+        self.wibox:emit_signal("widget::redraw_needed")
+    end
+
     self:set_geometry()
 end
 
