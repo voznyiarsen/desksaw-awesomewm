@@ -755,9 +755,11 @@ function box:step(dt)
 
     -- Redraw when the face changed (blink, lookback, talking). Without this,
     -- the wibox only redraws when the pet moves, so a standing pet's eyes
-    -- would never update.
+    -- would never update. `emit_signal` doesn't work on wiboxes; force a
+    -- geometry re-set to trigger a repaint.
     if face_dirty then
-        self.wibox:emit_signal("widget::redraw_needed")
+        local g = self.wibox:geometry()
+        self.wibox:geometry(g)
     end
 
     self:set_geometry()
