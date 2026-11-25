@@ -197,6 +197,11 @@ function box.new(screen, config)
     self.wander_phase = "idle"
     self.wander_idle_for = 4 + math.random() * 4
     self.wander_walk_for = 0
+    -- Wall-stall: when the pet tries to walk into a wall (dir set, grounded,
+    -- but vx ≈ 0), switch to idle and remember to pick the opposite direction
+    -- for the next wander.
+    self.wall_stall_timer = 0
+    self.next_wander_dir = nil
     self._last_vx = 0
     self._last_vy = 0
     self.last_tick = box.now()
@@ -359,8 +364,16 @@ end
 
 -- Pick a wander direction + optionally jump.
 function box:pick_wander()
-    self.dir = math.random(2) == 1 and 1 or -1
-    self.facing = self.dir
+    -- If the pet was blocked by a wall, pick the opposite direction so it
+    -- walks away from the wall rather than back into it.
+    local d = self.next_wander_dir
+    if d then
+        self.next_wander_dir = nil
+    else
+        d = math.random(2) == 1 and 1 or -1
+    end
+    self.dir = d
+    self.facing = d
     self.wander_phase = "walk"
     self.wander_timer = 0
     self.wander_walk_for = 0.5 + math.random() * 1.5  -- 0.5-2s walk
@@ -422,6 +435,27 @@ function box:step(dt)
                 self.wander_timer = 0
                 self.wander_idle_for = 4 + math.random() * 4  -- 4-8s idle
             end
+        end
+
+        -- Wall-stall: grounded, trying to walk (dir ~= 0), but not actually
+        -- moving (vx ≈ 0) means the pet walked into a wall. Stand still and
+        -- walk away from the wall on the next wander.
+        if self.grounded and self.dir ~= 0 then
+            if math.abs(self.phys.vx) < 30 then
+                self.wall_stall_timer = (self.wall_stall_timer or 0) + dt
+                if self.wall_stall_timer > 0.3 then
+                    local blocked_dir = self.dir
+                    self.dir = 0
+                    self.next_wander_dir = -blocked_dir
+                    self.wander_phase = "idle"
+                    self.wander_timer = 0
+                    self.wander_idle_for = 4 + math.random() * 4
+                end
+            else
+                self.wall_stall_timer = 0
+            end
+        else
+            self.wall_stall_timer = 0
         end
 
         -- Decide state from motion (DeskSaw movement_handler.gd): a grounded
