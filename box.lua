@@ -167,11 +167,10 @@ function box.new(screen, config)
     self._bgimage_func = function(context, cr, w, h, _, self_ref)
         -- Reset the clip to the full surface. The drawable clips to the dirty
         -- area before calling this callback, so cr:paint() would otherwise
-        -- only cover the dirty region. Clearing the clip lets us paint the
-        -- whole wibox surface transparent first, then draw the pet on top.
+        -- only cover the dirty region. CLEAR operator zeroes every pixel,
+        -- making the whole wibox surface transparent before we draw the pet.
         cr:reset_clip()
-        cr:set_source_rgba(0, 0, 0, 0)
-        cr:set_operator(cairo.Operator.SOURCE)
+        cr:set_operator(cairo.Operator.CLEAR)
         cr:paint()
         cr:set_operator(cairo.Operator.OVER)
         cr:save()
