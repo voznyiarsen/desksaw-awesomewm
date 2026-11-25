@@ -192,6 +192,11 @@ function box.new(screen, config)
     self.grounded = true
     self.ragdoll_timer = 0
     self.wander_timer = 0
+    -- Wander pattern (DeskSaw behavior.gd wandering()): idle 4-8s, then walk
+    -- 0.5-2s, then idle again. The pet spends most of its time standing still.
+    self.wander_phase = "idle"
+    self.wander_idle_for = 4 + math.random() * 4
+    self.wander_walk_for = 0
     self._last_vx = 0
     self._last_vy = 0
     self.last_tick = box.now()
@@ -354,18 +359,11 @@ end
 
 -- Pick a wander direction + optionally jump.
 function box:pick_wander()
-    local r = math.random()
-    if r < 0.05 then
-        -- rest briefly
-        self.dir = 0
-    else
-        self.dir = math.random(2) == 1 and 1 or -1
-        self.facing = self.dir
-    end
-    -- chance to jump while moving
-    if self.dir ~= 0 and math.random() < 0.25 then
-        self.jump_timer = 0.0
-    end
+    self.dir = math.random(2) == 1 and 1 or -1
+    self.facing = self.dir
+    self.wander_phase = "walk"
+    self.wander_timer = 0
+    self.wander_walk_for = 0.5 + math.random() * 1.5  -- 0.5-2s walk
 end
 
 -- ---------------------------------------------------------------------------
@@ -410,10 +408,20 @@ function box:step(dt)
         self.jump_timer = math.max(0, self.jump_timer - dt)
 
         -- Periodically pick a new wander direction.
+        -- Pattern (DeskSaw behavior.gd wandering()): idle 4-8s → walk 0.5-2s → idle.
+        -- The pet spends most of its time standing still.
         self.wander_timer = (self.wander_timer or 0) + dt
-        if self.wander_timer >= 1.5 then
-            self.wander_timer = 0
-            self:pick_wander()
+        if self.wander_phase == "idle" then
+            if self.wander_timer >= self.wander_idle_for then
+                self:pick_wander()
+            end
+        else -- "walk"
+            if self.wander_timer >= self.wander_walk_for then
+                self.dir = 0
+                self.wander_phase = "idle"
+                self.wander_timer = 0
+                self.wander_idle_for = 4 + math.random() * 4  -- 4-8s idle
+            end
         end
 
         -- Decide state from motion (DeskSaw movement_handler.gd): a grounded
@@ -440,13 +448,14 @@ function box:step(dt)
         elseif self.state == STATE_FALLING then clip = "fall"
         else clip = "idleagain" end
         if clip == "moveF" then
-            local norm = math.min(1, math.abs(self.phys.vx)
-                              / math.max(1, self.config.maxspeed * self.config.walk_mult))
-            -- Walk cycle playback speed. The moveF clip is 0.58s long; the
-            -- old (0.5 + 1.6 * norm) rate (~2/sec) looped it ~3.5 times a
-            -- second, which looked like running, not walking. Slow it to
-            -- roughly one loop every 0.6-0.7s at full pace.
-            self.phase = self.phase + dt * (0.25 + 0.8 * norm)
+            local norm = math.min(1, math.abs(self.phys.vx) / math.max(1, self.config.maxspeed))
+            -- Animation playback speed scales with velocity (DeskSaw
+            -- movement_handler.gd: speed_scale = (norm/2 + 0.1) * ANIM_MULT).
+            -- When the pet stops (e.g. against a wall) the cycle nearly
+            -- stops, so it never freezes mid-stride. At full walk speed the
+            -- 0.58s clip loops about once per second.
+            local speed_scale = (norm * 0.5 + 0.1) * 0.945
+            self.phase = self.phase + dt * speed_scale
         elseif clip == "jump" or clip == "fall" then
             self.phase = self.phase + dt
         else
@@ -490,9 +499,9 @@ function box:step(dt)
         end
 
         -- Jump to climb a wall/ledge, like movement_handler.gd's checkJump():
-        -- only when something blocks the path ahead, not at random. Random
-        -- hopping made the pet spend most of its time airborne (which reads
-        -- as "floating" and hides floor contact).
+        -- only when something blocks the path ahead AND there's headroom above
+        -- (like Godot's heightDetect raycast). Random hopping made the pet
+        -- spend most of its time airborne (which reads as "floating").
         if self.grounded and self.jump_timer <= 0 and self.dir ~= 0 then
             local a = self:workarea()
             local probe = self.phys.cx + self.dir * (self.hw + 2)
@@ -511,7 +520,22 @@ function box:step(dt)
                     end
                 end
             end
-            if blocked then
+            -- Headroom check (Godot heightDetect): only jump if there's clear
+            -- space above the pet's head, otherwise it would jump into a
+            -- ceiling or overhang.
+            local headroom = true
+            local head_top = self.phys.cy - self.hh
+            for _, ob in ipairs(obstacles) do
+                if ob.x >= a.x - 1 and ob.x + ob.w <= a.x + a.width + 1
+                   and ob.y >= a.y - 1 and ob.y + ob.h <= a.y + a.height + 1 then
+                    if self.phys.cx > ob.x and self.phys.cx < ob.x + ob.w
+                       and ob.y + ob.h > head_top - 40 and ob.y < head_top then
+                        headroom = false
+                        break
+                    end
+                end
+            end
+            if blocked and headroom then
                 self.phys.vy = (self.config.jump_power or -600)
                               * (self.config.jump_mult or 1.22)
                 self.jump_timer = self.config.jump_cooldown
