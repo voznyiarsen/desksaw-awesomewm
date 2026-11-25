@@ -96,28 +96,6 @@ function module.set_mode(screen)
     local actor = box.new(screen, module.config)
     actor.last_tick = box.now()
 
-    -- Debug menu: right-click the pet to force states for testing.
-    local debug_menu = awful.menu {
-        items = {
-            { "Idle",           function() actor:set_debug_state("idle", 0) end },
-            { "Move left",      function() actor:set_debug_state("moving", -1) end },
-            { "Move right",     function() actor:set_debug_state("moving", 1) end },
-            { "Jump",           function() actor:set_debug_state("jumping", 0) end },
-            { "Fall",           function() actor:set_debug_state("falling", 0) end },
-            { "Ragdoll",        function() actor:set_debug_state("ragdoll", 0) end },
-            { "Recover",        function() actor:set_debug_state("idle", 0) end },
-            { "Respawn",        function() actor:respawn() end },
-        },
-    }
-
-    -- Right-click on the pet opens the debug menu.
-    actor.wibox:buttons(gears.table.join(
-        awful.button({}, 1, function() actor:grab() end),
-        awful.button({}, 3, function()
-            debug_menu:toggle()
-        end)
-    ))
-
     local timer = gears.timer { timeout = 1 / module.config.fps }
     local step_dt = 1 / module.config.fps
     local acc = 0
@@ -141,6 +119,29 @@ function module.set_mode(screen)
 
     module.controllers[idx] = { screen = screen, actor = actor, timer = timer }
     return actor
+end
+
+-- Debug menu: force the pet into a specific state for testing.
+-- Uses AwesomeWM's awful.menu (the standard dropdown). Toggles on call.
+function module.debug_menu(screen)
+    local idx = screen and screen.index or 1
+    local ctrl = module.controllers[idx]
+    if not ctrl or not ctrl.actor then return end
+    local actor = ctrl.actor
+
+    local menu = awful.menu {
+        items = {
+            { "Idle",           function() actor:set_debug_state("idle", 0) end },
+            { "Move left",      function() actor:set_debug_state("moving", -1) end },
+            { "Move right",     function() actor:set_debug_state("moving", 1) end },
+            { "Jump",           function() actor:set_debug_state("jumping", 0) end },
+            { "Fall",           function() actor:set_debug_state("falling", 0) end },
+            { "Ragdoll",        function() actor:set_debug_state("ragdoll", 0) end },
+            { "Recover",        function() actor:set_debug_state("idle", 0) end },
+            { "Respawn",        function() actor:respawn() end },
+        },
+    }
+    menu:toggle()
 end
 
 function module.init(screen)
