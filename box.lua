@@ -139,7 +139,18 @@ function box.new(screen, config)
     self._draw_pet = draw_pet
 
     local function shape_fn(cr, w, h)
-        draw_pet(cr, w, h)
+        -- Paint the cached union silhouette. It covers every clip/phase, so
+        -- the mask never clips a walking or jumping limb.
+        local mask = self:_shape_mask(w, h)
+        if mask then
+            cr:set_source_surface(mask, 0, 0)
+            cr:paint()
+        end
+        -- Ragdoll limbs are driven by springs driven by collisions, so they
+        -- can reach past the clip union; add the live pose.
+        if self.state == STATE_RAGDOLL then
+            draw_pet(cr, w, h)
+        end
     end
     self._shape_fn = shape_fn
     self.wibox:set_shape(shape_fn)
@@ -149,6 +160,9 @@ function box.new(screen, config)
         self_ref._draw_pet(cr, w, h)
         cr:restore()
     end, nil, self)
+
+    -- Build both facing masks now, so the first direction flip does not hitch.
+    self:warm_shape_masks(vis, vis)
 
     -- Physics body. `physics.new_box(cx, cy, w, h)` creates a box centred on
     -- (cx, cy). We want the box's BOTTOM at the feet, so place the centre one
@@ -161,6 +175,10 @@ function box.new(screen, config)
     self.phys.vy = 0
     self.phys.angle = 0
     self.phys.omega = 0
+    -- Matches the Godot original's RigidBodies.lock_rotation = true: the body
+    -- must never tip onto a corner. A corner contact lifts the centre (the
+    -- pet floats) and can wedge it in place (it stops walking).
+    self.phys.lock_rotation = true
     -- Character state.
     self.state = STATE_IDLE
     self.dir = 0          -- -1 left, 0 none, 1 right
@@ -197,6 +215,30 @@ function box.new(screen, config)
 end
 
 function box:workarea() return self.screen.workarea end
+
+-- Cached wibox-shape masks, one per (size, facing). See skeleton.build_mask.
+function box:_shape_mask(w, h, facing)
+    self._shape_masks = self._shape_masks or {}
+    facing = facing or self.facing or 1
+    local key = w .. "x" .. h .. "x" .. facing
+    local m = self._shape_masks[key]
+    if not m then
+        local lean = math.rad(self.config.lean_max or 25)
+        local crouch = (self.config.land_crouch_max or 55) / self.scale
+        m = skeleton.build_mask(w, h, self.scale, facing, {
+            {}, { lean = lean }, { lean = -lean }, { crouch = crouch },
+        })
+        self._shape_masks[key] = m
+    end
+    return m
+end
+
+-- Build both facings up front. Building lazily on the first direction flip
+-- would stall that frame (~0.2 s for the union mask).
+function box:warm_shape_masks(w, h)
+    self:_shape_mask(w, h, 1)
+    self:_shape_mask(w, h, -1)
+end
 
 function box:respawn()
     if not self.phys then return end
@@ -363,6 +405,7 @@ function box:step(dt)
     -- Character logic (suppressed while ragdolled: the body is limp and the
     -- animation is frozen). Note the explicit early-out -- without it the
     -- motion-state block below would overwrite STATE_RAGDOLL.
+    local obstacles = self:obstacles()
     if self.state ~= STATE_RAGDOLL then
         self.jump_timer = math.max(0, self.jump_timer - dt)
 
@@ -373,10 +416,14 @@ function box:step(dt)
             self:pick_wander()
         end
 
-        -- Decide state from motion.
+        -- Decide state from motion (DeskSaw movement_handler.gd): a grounded
+        -- pet is moving whenever `dir` is non-zero. Do NOT compare the speed
+        -- against maxspeed here -- the walk limit is maxspeed * walk_mult
+        -- (384), so the old check flipped to idle at 240, braked, re-accelerated
+        -- and stuttered.
         local speed = math.abs(self.phys.vx)
         if self.grounded then
-            if self.dir ~= 0 and speed < self.config.maxspeed then
+            if self.dir ~= 0 then
                 self.state = STATE_MOVING
             else
                 self.state = STATE_IDLE
@@ -438,13 +485,35 @@ function box:step(dt)
             self.phys.vx = self.phys.vx * (1 - self.config.slowdown)
         end
 
-        -- Jump.
-        if self.grounded and self.jump_timer <= 0 and self.state ~= STATE_IDLE
-           and math.random() < 0.015 then
-            self.phys.vy = self.config.jump_power
-            self.jump_timer = self.config.jump_cooldown
-            self.since_grounded = self.config.coyote_time + 1
-            self:play_impact(math.abs(self.phys.vy))
+        -- Jump to climb a wall/ledge, like movement_handler.gd's checkJump():
+        -- only when something blocks the path ahead, not at random. Random
+        -- hopping made the pet spend most of its time airborne (which reads
+        -- as "floating" and hides floor contact).
+        if self.grounded and self.jump_timer <= 0 and self.dir ~= 0 then
+            local a = self:workarea()
+            local probe = self.phys.cx + self.dir * (self.hw + 2)
+            local mid_top = self.phys.cy - self.hh * 0.5
+            local mid_bot = self.phys.cy + self.hh * 0.5
+            local blocked = false
+            for _, ob in ipairs(obstacles) do
+                -- Ignore the four screen-boundary walls: the pet should turn
+                -- around at the screen edge, not bounce off it.
+                if ob.x >= a.x - 1 and ob.x + ob.w <= a.x + a.width + 1
+                   and ob.y >= a.y - 1 and ob.y + ob.h <= a.y + a.height + 1 then
+                    if probe > ob.x and probe < ob.x + ob.w
+                       and mid_bot > ob.y and mid_top < ob.y + ob.h then
+                        blocked = true
+                        break
+                    end
+                end
+            end
+            if blocked then
+                self.phys.vy = (self.config.jump_power or -600)
+                              * (self.config.jump_mult or 1.22)
+                self.jump_timer = self.config.jump_cooldown
+                self.since_grounded = self.config.coyote_time + 1
+                self:play_impact(math.abs(self.phys.vy))
+            end
         end
     end
 
@@ -460,7 +529,7 @@ function box:step(dt)
     end
 
     -- Integrate physics against obstacles.
-    physics.step(self.phys, dt, self:obstacles(), self.config)
+    physics.step(self.phys, dt, obstacles, self.config)
 
     -- Ground detection. `phys.cy` is the box CENTRE (physics.new_box was
     -- placed one half-height above the feet), so the FEET -- the box's bottom

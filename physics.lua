@@ -947,8 +947,19 @@ function physics.step(box, dt, obstacles, opt)
     local sdt = dt / substeps
     local st = { rested = false, support_vx = 0, support_vy = 0 }
     local was_settling = box.prev_settling or false
+    -- DeskSaw's rigid bodies set RigidBodies.lock_rotation = true: the pet is
+    -- never allowed to tumble. Without this the box tips onto a corner when it
+    -- lands, the contact lifts its centre off the floor (the pet "floats"),
+    -- and it can wedge itself on that corner so it stops walking. The visual
+    -- ragdoll is drawn from bone springs, not from this angle, so locking has
+    -- no downside.
+    local lock_rotation = box.lock_rotation and true or false
 
     for _ = 1, substeps do
+        if lock_rotation then
+            box.angle = 0
+            box.omega = 0
+        end
         st.settling = false
         -- Reset per-substep contact state: a transient touch in an early
         -- substep must not leave st.rested=true (and a stale support velocity)
@@ -982,7 +993,7 @@ function physics.step(box, dt, obstacles, opt)
         -- (that would dig the corner into the floor and make the resolve
         -- push sideways). The status must persist across step() calls, so
         -- the first sub-step of a frame never re-dig.
-        if not was_settling then
+        if not was_settling and not lock_rotation then
             -- Cap per-sub-step rotation to prevent single-frame rotational
             -- jitter at high spin rates.
             local max_step_omega = opt.max_step_angle / sdt
@@ -1022,6 +1033,9 @@ function physics.step(box, dt, obstacles, opt)
             for i = 1, #obstacles do
                 if resolve(box, obstacles[i], opt, sdt, st, wvx, wvy, rx, ry, n) then
                     resolved = true
+                    -- A locked body must not accumulate spin from contact
+                    -- impulses (friction would otherwise precess it).
+                    if lock_rotation then box.omega = 0 end
                     -- The body moved; rebuild its world-space caches so the
                     -- next obstacle (and next pass) tests the corrected pose.
                     world_verts(box, cos_a, sin_a)
@@ -1040,7 +1054,7 @@ function physics.step(box, dt, obstacles, opt)
         -- never leave a stale hinge), pinning that corner to the support
         -- top so the contact never lifts, digs, or stutters. The no_snap
         -- branch (rolling sprites) never hinges: see below.
-        if st.settling then
+        if st.settling and not lock_rotation then
             -- Deepest vertex = the contact point (the hinge) with the floor,
             -- used by the axis-aligned topple branch below.
             local px, py, best = 0, 0, -math.huge
@@ -1208,6 +1222,11 @@ function physics.step(box, dt, obstacles, opt)
     -- of the first sub-step of the next step() call.
     box.prev_settling = was_settling
 
+    if lock_rotation then
+        box.angle = 0
+        box.omega = 0
+    end
+
     -- A body resting on a support that is nearly still and nearly axis
     -- aligned is eased to that orientation: the remaining fraction of a
     -- degree is interpolated over several frames instead of hard-snapping,
@@ -1224,7 +1243,7 @@ function physics.step(box, dt, obstacles, opt)
     -- rest rides with a moving support (its world speed can be large) (item 11).
     local snap_rel_vx = box.vx - (st.support_vx or 0)
     local snap_rel_vy = box.vy - (st.support_vy or 0)
-    if st.rested
+    if st.rested and not lock_rotation
     and math.abs(snap_rel_vx) + math.abs(snap_rel_vy) < opt.sleep_speed
     and math.abs(box.omega) < opt.snap_spin then
         local target

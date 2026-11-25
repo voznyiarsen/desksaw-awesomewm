@@ -71,6 +71,51 @@ skeleton.eye_texture = "experimentEyeOpen"
 
 local surfaces = {}
 
+-- Pre-computed tight opaque bounds (alpha > 8) for the shipped PNGs, in
+-- surface pixel coordinates {x0, y0, x1, y1}. Reading pixels at load needs
+-- LuaJIT's FFI, which the system AwesomeWM build does NOT have (Lua 5.4), so
+-- the old fallback used the full padded canvas. That made the runtime physics
+-- box 88x63 units instead of the offline 31x48 -- so the pet collided with
+-- invisible padding and its measured feet did not match the art. These bounds
+-- are generated from the exact PNGs in assets/Body, so every runtime uses the
+-- same geometry (the file is a fixed game asset).
+local KNOWN_BBOX = {
+    ["experimentCrus"]        = { 2, 4, 6, 12 },
+    ["experimentDownArm"]     = { 4, 7, 8, 20 },
+    ["experimentDownTorso"]   = { 4, 5, 11, 15 },
+    ["experimentEyeClosed"]   = { 25, 15, 30, 17 },
+    ["experimentEyeGone"]     = { 25, 14, 30, 19 },
+    ["experimentEyeGoneHealed"] = { 25, 14, 31, 18 },
+    ["experimentEyeHalfClosed"] = { 25, 14, 30, 17 },
+    ["experimentEyeHalfClosedBack"] = { 25, 14, 30, 17 },
+    ["experimentEyeHappy"]    = { 24, 11, 31, 18 },
+    ["experimentEyeLookBack"] = { 26, 14, 30, 17 },
+    ["experimentEyeOpen"]     = { 26, 14, 30, 17 },
+    ["experimentEyePanic"]    = { 25, 13, 32, 20 },
+    ["experimentEyeSad"]      = { 25, 12, 31, 19 },
+    ["experimentEyeSadBack"]  = { 25, 12, 31, 19 },
+    ["experimentEyeScared"]   = { 24, 12, 30, 18 },
+    ["experimentEyeScaredBack"] = { 24, 12, 30, 18 },
+    ["experimentFoot"]        = { 3, 6, 9, 17 },
+    ["experimentHandB"]       = { 2, 2, 7, 6 },
+    ["experimentHandF"]       = { 3, 2, 8, 6 },
+    ["experimentHead"]        = { 14, 8, 34, 20 },
+    ["experimentHeadBack"]    = { 14, 8, 34, 20 },
+    ["experimentHeadBackMouth"] = { 14, 8, 34, 21 },
+    ["experimentHeadBackMouthMini"] = { 14, 8, 34, 20 },
+    ["experimentHeadDisfigured1"] = { 14, 8, 34, 20 },
+    ["experimentHeadDisfigured1Healed"] = { 14, 8, 34, 20 },
+    ["experimentHeadDisfigured2"] = { 14, 8, 33, 20 },
+    ["experimentHeadDisfigured2Healed"] = { 14, 8, 33, 20 },
+    ["experimentHeadDisfigured3"] = { 14, 8, 34, 20 },
+    ["experimentHeadDisfigured3Healed"] = { 14, 8, 34, 20 },
+    ["experimentNosebleed"]   = { 12, 7, 14, 11 },
+    ["experimentTail"]        = { 20, 10, 42, 30 },
+    ["experimentThigh"]       = { 3, 5, 9, 16 },
+    ["experimentUpArm"]       = { 2, 3, 6, 14 },
+    ["experimentUpTorso"]     = { 5, 3, 12, 13 },
+}
+
 local function opaque_bbox(surf)
     -- Tight bounds of the VISIBLE art inside a PNG canvas. The source PNGs are
     -- padded (experimentHeadBack is a 54x28 canvas holding a 20x12 head), and
@@ -113,7 +158,12 @@ local function load_surface(name)
         return nil
     end
     local s = { surface = surf, w = surf:get_width(), h = surf:get_height() }
-    s.bbox = opaque_bbox(surf)
+    local kb = KNOWN_BBOX[name]
+    if kb then
+        s.bbox = { x0 = kb[1], y0 = kb[2], x1 = kb[3], y1 = kb[4] }
+    else
+        s.bbox = opaque_bbox(surf)
+    end
     surfaces[name] = s
     return s
 end
@@ -367,7 +417,18 @@ function skeleton.draw(cr, o)
             -- LGI's cairo.Matrix(6 positional args) constructor segfaults.
             cr:save()
             cr:transform(cairo.Matrix {
-                xx = Wc[1], xy = Wc[2], yx = Wc[3], yy = Wc[4], x0 = Wc[5], y0 = Wc[6],
+                -- pose.lua matrices use the Godot layout
+                --   x' = M1*x + M3*y + M5
+                --   y' = M2*x + M4*y + M6
+                -- cairo uses
+                --   x' = xx*x + xy*y + x0
+                --   y' = yx*x + yy*y + y0
+                -- so the off-diagonal terms are swapped relative to ours.
+                -- Passing them through positionally silently transposes
+                -- every bone rotation, which splays rotated parts away from
+                -- their joints (the "fragmented" look).
+                xx = Wc[1], xy = Wc[3], yx = Wc[2], yy = Wc[4],
+                x0 = Wc[5], y0 = Wc[6],
             })
             cr:set_source_surface(s.surface, 0, 0)
             local pat = cr:get_source()
@@ -382,26 +443,59 @@ function skeleton.draw(cr, o)
             -- in this LGI/cairo build; clip() works.)
             local bb = s.bbox
             if bb then
-                -- Transform the clip rect corners through W to screen space,
-                -- then take the bounding box. Using raw bb.x0..bb.x1 after
-                -- cr:transform(Wc) creates an inverted rectangle when Wc[1]
-                -- is negative (facing left, scale.x < 0), which cairo treats
-                -- as an empty clip region -- resulting in pure black fill.
-                local c0x, c0y = rig.xform(W, bb.x0, bb.y0)
-                local c1x, c1y = rig.xform(W, bb.x1, bb.y1)
-                local c2x, c2y = rig.xform(W, bb.x0, bb.y1)
-                local c3x, c3y = rig.xform(W, bb.x1, bb.y0)
-                local cx0 = math.min(c0x, c1x, c2x, c3x)
-                local cy0 = math.min(c0y, c1y, c2y, c3y)
-                local cx1 = math.max(c0x, c1x, c2x, c3x)
-                local cy1 = math.max(c0y, c1y, c2y, c3y)
-                cr:rectangle(cx0, cy0, cx1 - cx0, cy1 - cy0)
+                cr:rectangle(bb.x0, bb.y0, bb.x1 - bb.x0, bb.y1 - bb.y0)
                 cr:clip()
             end
             cr:paint()
             cr:restore()
         end
     end
+end
+
+-- ---------------------------------------------------------------------------
+-- Wibox shape mask.
+--
+-- AwesomeWM's wibox shape callback paints into an A1 (1-bit) surface, so
+-- anything not painted is clipped away. Drawing only the CURRENT pose (the
+-- old code did exactly that) makes the mask a snapshot: once the walk cycle
+-- swings a leg outside the idle silhouette, that leg is cut off until the
+-- facing happens to change and the mask is rebuilt. That is the walking
+-- "fragmentation".
+--
+-- Build ONE mask that is the union of every clip at several phases (plus the
+-- lean/crouch extremes) and reuse it. The shape then never changes while
+-- walking, and the visible sprite is always inside it.
+-- ---------------------------------------------------------------------------
+
+local MASK_CLIPS = { "idleagain", "moveF", "moveB", "jump", "fall", "sit", "laydown" }
+local MASK_PHASES = 4
+
+-- w, h: mask size in wibox pixels (the shape callback's width/height).
+-- poses: optional list of { lean = rad, crouch = units } variants.
+function skeleton.build_mask(w, h, scale, facing, poses)
+    local surf = cairo.ImageSurface(cairo.Format.ARGB32, w, h)
+    local cr = cairo.Context(surf)
+    cr:set_operator(cairo.Operator.CLEAR)
+    cr:paint()
+    cr:set_operator(cairo.Operator.OVER)
+
+    local variants = poses or { {} }
+    for _, clip in ipairs(MASK_CLIPS) do
+        local len = skeleton.clip_length(clip)
+        for i = 0, MASK_PHASES - 1 do
+            local phase = (len and len > 0) and (len * i / MASK_PHASES) or 0
+            for _, v in ipairs(variants) do
+                pcall(skeleton.draw, cr, {
+                    x = w / 2, y = h / 2,
+                    scale = scale, facing = facing,
+                    clip = clip, phase = phase,
+                    lean = v.lean or 0,
+                    crouch = v.crouch or 0,
+                })
+            end
+        end
+    end
+    return surf
 end
 
 return skeleton
