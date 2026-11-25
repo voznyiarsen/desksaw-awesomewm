@@ -416,7 +416,8 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Debug / test helpers: force the pet into a specific state so each pose can
--- be inspected. Bound to a right-click menu from init.lua.
+-- be inspected. Bound to AwesomeWM's main menu (right-click workspace) via
+-- desksaw.debug_menu() in rc.lua.
 -- ---------------------------------------------------------------------------
 
 --- Force the pet into a given state for testing.
