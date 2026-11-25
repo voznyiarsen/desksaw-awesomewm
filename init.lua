@@ -92,6 +92,9 @@ function module.set_mode(screen)
         ctrl.actor:destroy()
         if ctrl.timer then ctrl.timer:stop() end
     end
+    -- Invalidate cached debug menu for this screen so it gets recreated
+    -- with the new actor reference.
+    debug_menus[idx] = nil
 
     local actor = box.new(screen, module.config)
     actor.last_tick = box.now()
@@ -123,24 +126,32 @@ end
 
 -- Debug menu: force the pet into a specific state for testing.
 -- Uses AwesomeWM's awful.menu (the standard dropdown). Toggles on call.
+-- Menu is cached per screen so the same instance is reused (no spawning
+-- new menu instances on every call).
+local debug_menus = {}
 function module.debug_menu(screen)
     local idx = screen and screen.index or 1
     local ctrl = module.controllers[idx]
     if not ctrl or not ctrl.actor then return end
     local actor = ctrl.actor
 
-    local menu = awful.menu {
-        items = {
-            { "Idle",           function() actor:set_debug_state("idle", 0) end },
-            { "Move left",      function() actor:set_debug_state("moving", -1) end },
-            { "Move right",     function() actor:set_debug_state("moving", 1) end },
-            { "Jump",           function() actor:set_debug_state("jumping", 0) end },
-            { "Fall",           function() actor:set_debug_state("falling", 0) end },
-            { "Ragdoll",        function() actor:set_debug_state("ragdoll", 0) end },
-            { "Recover",        function() actor:set_debug_state("idle", 0) end },
-            { "Respawn",        function() actor:respawn() end },
-        },
-    }
+    -- Reuse cached menu if it exists; otherwise create it once.
+    local menu = debug_menus[idx]
+    if not menu then
+        menu = awful.menu {
+            items = {
+                { "Idle",           function() actor:set_debug_state("idle", 0) end },
+                { "Move left",      function() actor:set_debug_state("moving", -1) end },
+                { "Move right",     function() actor:set_debug_state("moving", 1) end },
+                { "Jump",           function() actor:set_debug_state("jumping", 0) end },
+                { "Fall",           function() actor:set_debug_state("falling", 0) end },
+                { "Ragdoll",        function() actor:set_debug_state("ragdoll", 0) end },
+                { "Recover",        function() actor:set_debug_state("idle", 0) end },
+                { "Respawn",        function() actor:respawn() end },
+            },
+        }
+        debug_menus[idx] = menu
+    end
     menu:toggle()
 end
 
