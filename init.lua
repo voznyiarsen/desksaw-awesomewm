@@ -182,7 +182,9 @@ function module.toggle_debug_menu(screen)
         }
         debug_menus[idx] = menu
     end
-    menu:toggle()
+    -- Use show() instead of toggle(): when called from a parent menu item
+    -- callback, toggle() can conflict with the parent menu closing.
+    pcall(function() menu:show() end)
 end
 
 function module.init(screen)
